@@ -1,4 +1,5 @@
 import csv
+import pandas as pd
 from pathlib import Path
 from ast import literal_eval
 from tqdm import tqdm
@@ -23,6 +24,7 @@ with open(dedup_hathi_meta_path, 'r') as f:
             duped_books.add(i)
         clusters[gid] = gid_set
 
+anthologies = set(pd.read_csv('anthologies.csv')['hathi_id'])
 seen = set()
 with open(hathi_meta_path, 'r') as rf:
     reader = csv.DictReader(rf)
@@ -32,6 +34,8 @@ with open(hathi_meta_path, 'r') as rf:
         writer.writeheader()
         for row in tqdm(reader):
             gid = row['htid']
+            if gid in anthologies:
+                continue
             if gid in seen:
                 continue
             seen.add(gid)

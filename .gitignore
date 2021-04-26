@@ -1,3 +1,9 @@
 *.pyc
+*.ipynb_checkpoints
 __pycache__
 *.csv
+*_dataset
+*.pkl
+logs
+results
+*_model
