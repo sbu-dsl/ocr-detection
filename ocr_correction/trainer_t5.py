@@ -1,3 +1,6 @@
+import os
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3,4,5"
 import csv
 import numpy as np
 import random
@@ -67,9 +70,9 @@ tokenizer.add_special_tokens({"additional_special_tokens": ["<ocr>", "</ocr>", "
 
 
 print("Loading train")
-#num_samples = 1000000
-#df = pd.read_csv('train.csv', converters={'ctx1': eval, 'ctx2': eval, 'diff1': eval, 'diff2': eval}, nrows=num_samples)
-df = pd.read_csv('train.csv', converters={'ctx1': eval, 'ctx2': eval, 'diff1': eval, 'diff2': eval})
+num_samples = 1000000
+train_path = '/home/allekim/ocr-detection/ocr_data/train.csv'
+df = pd.read_csv(train_path, converters={'ctx1': eval, 'ctx2': eval, 'diff1': eval, 'diff2': eval}, nrows=num_samples)
 df[['orig','corrected']] = df.apply(generate_examples, axis=1, result_type="expand")
 train_data, val_data = train_test_split(df[['orig','corrected']], test_size=0.2, random_state=seed)
 train_dataset = Dataset.from_pandas(train_data)
@@ -104,7 +107,7 @@ data_collator = DataCollatorForSeq2Seq(
 training_args = Seq2SeqTrainingArguments(
     output_dir='./results',          # output directory
     num_train_epochs=3,              # total number of training epochs
-    per_device_train_batch_size=4,  # batch size per device during training
+    per_device_train_batch_size=8,  # batch size per device during training
     per_device_eval_batch_size=16,   # batch size for evaluation
     warmup_steps=500,                # number of warmup steps for learning rate scheduler
     weight_decay=0.01,               # strength of weight decay

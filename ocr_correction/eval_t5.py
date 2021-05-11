@@ -1,6 +1,10 @@
+import os
 import csv
 import numpy as np
+import pickle
 import random
+from pathlib import Path
+from tqdm import tqdm
 
 import pandas as pd
 from datasets import load_dataset, load_metric, Dataset
@@ -19,6 +23,7 @@ from transformers.utils import check_min_version
 check_min_version("4.6.0.dev0")
 
 def generate_examples(row):
+    hid1, hid2 = row['hid1'], row['hid2']
     loss1, loss2 = row['loss1'], row['loss2']
     diff1, diff2 = row['diff1'], row['diff2']
     ctx1, ctx2 = row['ctx1'], row['ctx2']
@@ -29,11 +34,11 @@ def generate_examples(row):
     if loss1 < loss2:
         if ocr1:
             correct = ' '.join(ocr1)
-        return ex2, correct
+        return hid2, ex2, correct
     else:
         if ocr2:
             correct = ' '.join(ocr2)
-        return ex1, correct
+        return hid1, ex1, correct
 
 def preprocess_function(examples):
     inputs = examples['orig']
@@ -57,7 +62,7 @@ def preprocess_function(examples):
 
 seed = 1729
 set_seed(seed)
-model_name = "t5-base"
+model_name = "ocr_correction_model"
 
 print("Loading tokenizer")
 tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -65,61 +70,48 @@ tokenizer = AutoTokenizer.from_pretrained(model_name)
 tokenizer.add_tokens(["<ocr>", "</ocr>", "<blank>"], special_tokens=True)        
 tokenizer.add_special_tokens({"additional_special_tokens": ["<ocr>", "</ocr>", "<blank>"]})
 
+print("Loading test")
+num_samples = 200000
+testp = Path('/home/allekim/ocr-detection/ocr_data/test.csv')
+df = pd.read_csv(testp, converters={'ctx1': eval, 'ctx2': eval, 'diff1': eval, 'diff2': eval}, nrows=num_samples)
+df = df.sample(num_samples, random_state=seed)
+df[['hid', 'orig','corrected']] = df.apply(generate_examples, axis=1, result_type="expand")
+test_dataset = Dataset.from_pandas(df[['hid', 'orig', 'corrected']])
 
-print("Loading train")
-num_samples = 100000
-df = pd.read_csv('train.csv', converters={'ctx1': eval, 'ctx2': eval, 'diff1': eval, 'diff2': eval}, nrows=num_samples)
-df[['orig','corrected']] = df.apply(generate_examples, axis=1, result_type="expand")
-train_data, val_data = train_test_split(df[['orig','corrected']], test_size=0.2, random_state=seed)
-train_dataset = Dataset.from_pandas(train_data)
-val_dataset = Dataset.from_pandas(val_data)
-
-train_dataset = train_dataset.map(
+test_dataset = test_dataset.map(
     preprocess_function,
     batched=True,
-    num_proc=48,
-)
-
-val_dataset = val_dataset.map(
-    preprocess_function,
-    batched=True,
-    num_proc=48,
+    batch_size=None,
+    num_proc=1,
 )
 
 print("Loading model")
-model = AutoModelForSeq2SeqLM.from_pretrained('ocr_correction_model')
+model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
 model.resize_token_embeddings(len(tokenizer))
+device = "cuda:4"
+model.to(device)
 
-print("Data collator")
-label_pad_token_id = -100
-data_collator = DataCollatorForSeq2Seq(
-    tokenizer,
-    model=model,
-    label_pad_token_id=label_pad_token_id,
-    pad_to_multiple_of=8
-)
+print("Evaluating")
+results = []
+i = 0
+batch_size = 64
+for i in tqdm(range(0,len(test_dataset), batch_size)):
+    x = test_dataset[i:i+batch_size]
+    input_ids = torch.tensor(x['input_ids']).to(device)
+    attention_mask = torch.tensor(x['attention_mask']).to(device)
+    result = model.generate(input_ids=input_ids, attention_mask=attention_mask, output_scores=True, return_dict_in_generate=True)
+    for j in range(len(x)):
+        scores = np.array([y[j].detach().cpu().numpy() for y in result.scores])
+        generated = result.sequences[j].detach().cpu().numpy()
+        end_idx = np.where(generated==1)[0]
+        if len(end_idx) > 0:
+            outtoks = tokenizer.convert_ids_to_tokens(generated)
+            final_string = tokenizer.convert_tokens_to_string(outtoks[1:end_idx[0]])
+            results.append((x['hid'][j], x['orig'][j], x['corrected'][j], final_string, scores))
 
-
-training_args = Seq2SeqTrainingArguments(
-    output_dir='./results',          # output directory
-    num_train_epochs=3,              # total number of training epochs
-    per_device_train_batch_size=4,  # batch size per device during training
-    per_device_eval_batch_size=16,   # batch size for evaluation
-    warmup_steps=500,                # number of warmup steps for learning rate scheduler
-    weight_decay=0.01,               # strength of weight decay
-    logging_dir='./logs',            # directory for storing logs
-    logging_steps=10,
-)
-
-trainer = Seq2SeqTrainer(
-    model=model,
-    args=training_args,
-    train_dataset=train_dataset,
-    eval_dataset=val_dataset,
-    tokenizer=tokenizer,
-    data_collator=data_collator
-)
-
-trainer.train()
-trainer.save_model('ocr_correction_model')
-
+with open('results.pkl', 'wb') as f:
+    pickle.dump(results, f, 4)
+"""
+df = pd.DataFrame(results, columns=['sent', 'truth', 'gen', 'scores'])
+df.to_csv('new_results.csv')
+"""

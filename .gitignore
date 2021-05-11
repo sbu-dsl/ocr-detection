@@ -7,3 +7,5 @@ __pycache__
 logs
 results
 *_model
+*.dt
+*.pt

@@ -42,8 +42,8 @@ for lab, i in tqdm(parsed_ids):
             l2 = int(l2)
             overlap = int(overlap)
             if l1 > 0 and l2 > 0 and overlap / min(l1,l2) > 0.25:
-                adj[(l1, i)].add((l2, other_id))
-                adj[(l2, other_id)].add((l1, i))
+                adj[(l1, hid)].add((l2, other_id))
+                adj[(l2, other_id)].add((l1, hid))
 
 
 with open('dedup_hathi.csv', 'w') as csvfile:
